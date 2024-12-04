@@ -278,6 +278,7 @@ $empty_data_builder = new class
             'attach_ticket_documents_to_mail' => '0',
             'backcreated' => '0',
             'task_state' => '1',
+            'planned_task_state' => '1',
             'palette' => 'auror',
             'page_layout' => 'vertical',
             'fold_menu' => '0',

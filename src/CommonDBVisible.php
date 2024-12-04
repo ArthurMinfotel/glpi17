@@ -36,8 +36,14 @@
 /**
  * Common DataBase visibility for items
  */
-abstract class CommonDBVisible extends CommonDBTM
+trait CommonDBVisible
 {
+    /**
+     * Types of target available for the itemtype
+     * @var string[]
+     */
+    public static $types = ['Entity', 'Group', 'Profile', 'User'];
+
     /**
      * Entities on which item is visible.
      * Keys are ID, values are DB fields values.
@@ -119,7 +125,7 @@ abstract class CommonDBVisible extends CommonDBTM
     public function haveVisibilityAccess()
     {
        // Author
-        if ($this->fields['users_id'] == Session::getLoginUserID()) {
+        if (isset($this->fields['users_id']) && $this->fields['users_id'] == Session::getLoginUserID()) {
             return true;
         }
        // Users
@@ -203,6 +209,22 @@ abstract class CommonDBVisible extends CommonDBTM
     }
 
     /**
+     * Get right which will be used to determine which users can be targeted
+     * @return string
+     */
+    public function getVisibilityRight() {
+        return strtolower($this::getType()) . '_public';
+    }
+
+    /**
+     * List of target types available for the object
+     * @return string[]
+     */
+    public static function getTypes() {
+        return self::$types;
+    }
+
+    /**
      * Show visibility configuration
      *
      * @since 9.2 moved from each class to parent class
@@ -230,7 +252,7 @@ abstract class CommonDBVisible extends CommonDBTM
             echo "<tr class='tab_bg_1'><th colspan='4'>" . __('Add a target') . "</tr>";
             echo "<tr class='tab_bg_1'><td class='tab_bg_2' width='100px'>";
 
-            $types   = ['Entity', 'Group', 'Profile', 'User'];
+            $types   = static::getTypes();
 
             $addrand = Dropdown::showItemTypes('_type', $types);
             $params = $this->getShowVisibilityDropdownParams();
@@ -260,7 +282,7 @@ abstract class CommonDBVisible extends CommonDBTM
                               => ['delete' => _x('button', 'Delete permanently')]
             ];
 
-            if ($this->fields['users_id'] != Session::getLoginUserID()) {
+            if (isset($this->fields['users_id']) && $this->fields['users_id'] != Session::getLoginUserID()) {
                 $massiveactionparams['confirm']
                 = __('Caution! You are not the author of this element. Delete targets can result in loss of access to that element.');
             }
@@ -289,7 +311,8 @@ abstract class CommonDBVisible extends CommonDBTM
                     echo "<tr class='tab_bg_1'>";
                     if ($canedit) {
                         echo "<td>";
-                        Html::showMassiveActionCheckBox($this::getType() . '_User', $data["id"]);
+                        $itemtype = $this::getType() != SavedSearch::getType() ? $this::getType() . '_User' : $this::getType() . '_UserTarget';
+                        Html::showMassiveActionCheckBox($itemtype, $data["id"]);
                         echo "</td>";
                     }
                     echo "<td>" . User::getTypeName(1) . "</td>";
@@ -434,9 +457,16 @@ abstract class CommonDBVisible extends CommonDBTM
      */
     protected function getShowVisibilityDropdownParams()
     {
-        return [
-            'type'  => '__VALUE__',
-            'right' => strtolower($this::getType()) . '_public'
-        ];
+        $params = ['type'  => '__VALUE__'];
+        if ($right = $this->getVisibilityRight()) {
+            $params['right'] = $right;
+        }
+        if (isset($this->fields['entities_id'])) {
+            $params['entity'] = $this->fields['entities_id'];
+            if (isset($this->fields['is_recursive'])) {
+                $params['entity_sons'] = $this->fields['is_recursive'];
+            }
+        }
+        return $params;
     }
 }

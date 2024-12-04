@@ -40,8 +40,11 @@ use Glpi\Toolbox\Sanitizer;
 /**
  * KnowbaseItem Class
  **/
-class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
+class KnowbaseItem extends CommonDBTM implements ExtraVisibilityCriteria
 {
+    use CommonDBVisible {
+        CommonDBVisible::haveVisibilityAccess as traitHaveVisibilityAccess;
+    }
     use Glpi\Features\Clonable;
 
    // From CommonDBTM
@@ -510,7 +513,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
             return true;
         }
 
-        return parent::haveVisibilityAccess();
+        return $this->traitHaveVisibilityAccess();
     }
 
     /**

@@ -510,6 +510,11 @@ trait PlanningEvent
             $WHERE['state'] = ['!=', Planning::INFO];
         }
 
+        if (isset($options['not_done']) && $options['not_done']) {
+            $options['display_done_events'] = false;
+            $WHERE[] = ['state'  => ['!=', Planning::DONE]];
+        }
+
         if (!$options['display_done_events']) {
             $WHERE[] = [
                 'OR' => [

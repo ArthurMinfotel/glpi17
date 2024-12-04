@@ -195,6 +195,7 @@
                            'on_change': 'itiltasktemplate_update' ~ rand ~ '(this.value)',
                            'entity': item.fields['entities_id'],
                            'rand': rand,
+                            'condition' : subitem_template.getDropdownCondition()
                         }
                      ) }}
 
@@ -229,26 +230,6 @@
                            'condition': {
                               'is_active': 1,
                            },
-                           'rand': rand,
-                        }
-                     ) }}
-
-                     {# Status #}
-                     {% set task_state_lbl %}
-                        <i class="fas fa-tasks fa-fw me-1" title="{{ __('Status') }}"></i>
-                     {% endset %}
-
-                     {% set task_state %}
-                        {% do call('Planning::dropdownState', ['state', subitem.fields['state'], true, {'rand': rand}]) %}
-                     {% endset %}
-
-                     {{ fields.htmlField(
-                        'state',
-                        task_state,
-                        task_state_lbl,
-                        {
-                           'full_width': true,
-                           'icon_label': true,
                            'rand': rand,
                         }
                      ) }}
@@ -353,6 +334,26 @@
                         }
                      ) }}
 
+                      {# Status #}
+                      {% set task_state_lbl %}
+                          <i class="fas fa-tasks fa-fw me-1" title="{{ __('Status') }}"></i>
+                      {% endset %}
+
+                      {% set task_state %}
+                          {% do call('Planning::dropdownState', ['state', subitem.fields['state'], true, {'rand': rand}]) %}
+                      {% endset %}
+
+                      {{ fields.htmlField(
+                          'state',
+                          task_state,
+                          task_state_lbl,
+                          {
+                              'full_width': true,
+                              'icon_label': true,
+                              'rand': rand,
+                          }
+                      ) }}
+
                      <script type="text/javascript">
                         function showPlanUpdate{{ rand }}(e) {
                            $('#plan{{ rand }}').hide();
@@ -369,6 +370,7 @@
                               parent_fk_field: "{{ item.getForeignKeyField() }}",
                               begin: "{{ subitem.fields['begin'] }}",
                               end: "{{ subitem.fields['end'] }}",
+                               rand: "{{ rand }}"
                            });
                         }
                      </script>

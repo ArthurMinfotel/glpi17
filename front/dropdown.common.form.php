@@ -166,6 +166,60 @@ if (isset($_POST["add"])) {
     );
     $dropdown->showForm($_GET["id"]);
     Html::popFooter();
+} else if (isset($_POST["addvisibility"])) {
+    if (
+        isset($_POST["_type"]) && !empty($_POST["_type"])
+        && isset($_POST[$dropdown::getForeignKeyField()]) && $_POST[$dropdown::getForeignKeyField()]
+    ) {
+        if (array_key_exists('entities_id', $_POST) && $_POST['entities_id'] == -1) {
+            // "No restriction" value selected
+            $_POST['entities_id'] = 'NULL';
+            $_POST['no_entity_restriction'] = 1;
+        }
+        $item = null;
+        switch ($_POST["_type"]) {
+            case 'User':
+                if (isset($_POST['users_id']) && $_POST['users_id']) {
+                    $class = $dropdown->getType() . '_' . 'User';
+                    $item = new $class();
+                }
+                break;
+
+            case 'Group':
+                if (isset($_POST['groups_id']) && $_POST['groups_id']) {
+                    $class = 'Group' . '_' . $dropdown->getType();
+                    $item = new $class();
+                }
+                break;
+
+            case 'Profile':
+                if (isset($_POST['profiles_id']) && $_POST['profiles_id']) {
+                    $class = 'Profile' . '_' . $dropdown->getType();
+                    $item = new $class();
+                }
+                break;
+
+            case 'Entity':
+                if (isset($_POST['entities_id'])) {
+                    $class = 'Entity' . '_' . $dropdown->getType();
+                    $item = new $class();
+                }
+                break;
+        }
+
+        if (!is_null($item)) {
+            $item->add($_POST);
+            Event::log(
+                $_POST[$dropdown::getForeignKeyField()],
+                $dropdown->getType(),
+                4,
+                "tools",
+                //TRANS: %s is the user login
+                sprintf(__('%s adds a target'), $_SESSION["glpiname"])
+            );
+        }
+    }
+    Html::back();
 } else {
     if (!isset($options)) {
         $options = [];

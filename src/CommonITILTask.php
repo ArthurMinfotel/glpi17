@@ -1168,6 +1168,16 @@ abstract class CommonITILTask extends CommonDBTM implements CalDAVCompatibleItem
                 $item->getTable() . '.begin'   => ['<=', $end]
             ];
         }
+
+        if (isset($options['not_done']) && $options['not_done']) {
+            $WHERE[] = [
+                $item->getTable() . '.state' => ['!=', Planning::DONE],
+                'NOT' => [
+                    $parentitem->getTable() . '.status' => [CommonITILObject::CLOSED, CommonITILObject::SOLVED]
+                ]
+            ];
+        }
+
         $ADDWHERE = [];
 
         if ($whogroup === "mine") {

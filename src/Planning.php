@@ -904,7 +904,7 @@ JAVASCRIPT;
 
         return array_merge(
             $CFG_GLPI['planning_types'],
-            ['NotPlanned', 'OnlyBgEvents']
+            ['NotPlanned', 'OnlyBgEvents', 'NotDone']
         );
     }
 
@@ -936,11 +936,11 @@ JAVASCRIPT;
         $filters = &$_SESSION['glpi_plannings']['filters'];
         $index_color = 0;
         foreach (self::getPlanningTypes() as $planning_type) {
-            if (in_array($planning_type, ['NotPlanned', 'OnlyBgEvents']) || $planning_type::canView()) {
+            if (in_array($planning_type, ['NotPlanned', 'OnlyBgEvents', 'NotDone']) || $planning_type::canView()) {
                 if (!isset($filters[$planning_type])) {
                     $filters[$planning_type] = [
                         'color'   => self::getPaletteColor('ev', $index_color),
-                        'display' => !in_array($planning_type, ['NotPlanned', 'OnlyBgEvents']),
+                        'display' => !in_array($planning_type, ['NotPlanned', 'OnlyBgEvents', 'NotDone']),
                         'type'    => 'event_filter'
                     ];
                 }
@@ -1092,6 +1092,8 @@ JAVASCRIPT;
                 $title = __('Not planned tasks');
             } else if ($filter_key == 'OnlyBgEvents') {
                 $title = __('Only background events');
+            } else if ($filter_key == 'NotDone') {
+                $title = __("Seulement les éléments non fait");
             } else {
                 if (!getItemForItemtype($filter_key)) {
                     return false;
@@ -1141,7 +1143,7 @@ JAVASCRIPT;
 
         echo "<span class='ms-auto d-flex align-items-center'>";
        // colors not for groups
-        if ($filter_data['type'] != 'group_users' && $filter_key != 'OnlyBgEvents') {
+        if ($filter_data['type'] != 'group_users' && $filter_key != 'OnlyBgEvents' && $filter_key != 'NotDone') {
             echo "<span class='color_input'>";
             Html::showColorField(
                 $filter_key . "_color",
@@ -1666,6 +1668,12 @@ JAVASCRIPT;
             $rand = $params['rand'];
         }
 
+        if (isset($_SESSION['glpiplanned_task_state']) && CommonDBTM::isNewID($params['items_id']) && isset($params['rand'])) {
+            echo Html::scriptBlock(
+                "$('#dropdown_state" . $params['rand'] . "').trigger('setValue', " . $_SESSION['glpiplanned_task_state'] . ");"
+            );
+        }
+
         $display_dates = $params['_display_dates'] ?? true;
 
         $mintime = $CFG_GLPI["planning_begin"];
@@ -2026,6 +2034,11 @@ JAVASCRIPT;
 
         $param['begin'] = date("Y-m-d H:i:s", $time_begin);
         $param['end']   = date("Y-m-d H:i:s", $time_end);
+
+        $param['not_done'] = false;
+        if ($_SESSION['glpi_plannings']['filters']['NotDone']['display']) {
+            $param['not_done'] = true;
+        }
 
         $raw_events = [];
         $not_planned = [];

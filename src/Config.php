@@ -1391,14 +1391,8 @@ class Config extends CommonDBTM
 
             echo "<tr class='tab_bg_2'><td><label for='dropdown_task_state$rand'>" . __('Tasks state by default') . "</label></td><td>";
             Planning::dropdownState("task_state", $data["task_state"], true, ['rand' => $rand]);
-            echo "</td><td><label for='dropdown_refresh_views$rand'>" . __('Automatically refresh data (tickets list, project kanban) in minutes.') . "</label></td><td>";
-            Dropdown::showNumber('refresh_views', ['value' => $data["refresh_views"],
-                'min'   => 1,
-                'max'   => 30,
-                'step'  => 1,
-                'toadd' => [0 => __('Never')],
-                'rand'  => $rand
-            ]);
+            echo "</td><td><label for='dropdown_task_state$rand'>" . __('Planned Tasks default state') . "</label></td><td>";
+            Planning::dropdownState("planned_task_state", $data["planned_task_state"], true, ['rand' => $rand]);
             echo "</td></tr>";
 
             echo "<tr class='tab_bg_2'><td><label for='dropdown_set_default_tech$rand'>" . __('Pre-select me as a technician when creating a ticket') .
@@ -1424,7 +1418,14 @@ class Config extends CommonDBTM
                 'value' => $data['timeline_action_btn_layout'],
                 'rand' => $rand
             ]);
-            echo "</td><td></td></tr>";
+            echo "</td><td><label for='dropdown_refresh_views$rand'>" . __('Automatically refresh data (tickets list, project kanban) in minutes.') . "</label></td><td>";
+            Dropdown::showNumber('refresh_views', ['value' => $data["refresh_views"],
+                'min'   => 1,
+                'max'   => 30,
+                'step'  => 1,
+                'toadd' => [0 => __('Never')],
+                'rand'  => $rand
+            ]);
             echo "</td></tr>";
 
             echo "<tr class='tab_bg_2'><td><label for='timeline_date_format$rand'>" . __('Timeline date display') .
