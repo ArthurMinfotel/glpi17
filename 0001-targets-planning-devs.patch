@@ -1,0 +1,2659 @@
+From 5cf571c90c733662926ee37bf296253af6640188 Mon Sep 17 00:00:00 2001
+From: ArthurMinfotel <arthur.mallet@infotel.com>
+Date: Wed, 4 Dec 2024 14:09:18 +0100
+Subject: [PATCH] targets & planning devs
+
+---
+ ajax/subvisibility.php                        |   6 +
+ ajax/visibility.php                           |  90 +++++--
+ front/dropdown.common.form.php                |  54 ++++
+ front/savedsearch.form.php                    |  40 +++
+ inc/define.php                                |   2 +-
+ install/empty_data.php                        |   1 +
+ src/AbstractITILChildTemplate.php             | 245 ++++++++++++++++++
+ src/CommonDBVisible.php                       |  48 +++-
+ src/CommonITILObject.php                      |   4 +
+ src/CommonITILTask.php                        |  10 +
+ src/Config.php                                |  19 +-
+ src/Entity_ITILFollowupTemplate.php           |  71 +++++
+ src/Entity_SolutionTemplate.php               |  71 +++++
+ src/Entity_TaskTemplate.php                   |  71 +++++
+ src/Features/PlanningEvent.php                |   5 +
+ src/Group_ITILFollowupTemplate.php            |  66 +++++
+ src/Group_SavedSearch.php                     |  73 ++++++
+ src/Group_SolutionTemplate.php                |  73 ++++++
+ src/Group_TaskTemplate.php                    |  66 +++++
+ src/ITILFollowupTemplate_User.php             |  66 +++++
+ src/KnowbaseItem.php                          |   7 +-
+ src/Planning.php                              |  21 +-
+ src/Profile_ITILFollowupTemplate.php          |  65 +++++
+ src/Profile_SolutionTemplate.php              |  74 ++++++
+ src/Profile_TaskTemplate.php                  |  66 +++++
+ src/RSSFeed.php                               |   7 +-
+ src/Reminder.php                              |   7 +-
+ src/SavedSearch.php                           | 172 +++++++++++-
+ src/SavedSearch_UserTarget.php                | 107 ++++++++
+ src/SolutionTemplate_User.php                 |  72 +++++
+ src/TaskTemplate_User.php                     |  65 +++++
+ targets.sql                                   | 209 +++++++++++++++
+ .../components/itilobject/answer.html.twig    |   3 +-
+ .../timeline/form_followup.html.twig          |   1 +
+ .../timeline/form_solution.html.twig          |   1 +
+ .../itilobject/timeline/form_task.html.twig   |  42 +--
+ 36 files changed, 1922 insertions(+), 78 deletions(-)
+ create mode 100644 src/Entity_ITILFollowupTemplate.php
+ create mode 100644 src/Entity_SolutionTemplate.php
+ create mode 100644 src/Entity_TaskTemplate.php
+ create mode 100644 src/Group_ITILFollowupTemplate.php
+ create mode 100644 src/Group_SavedSearch.php
+ create mode 100644 src/Group_SolutionTemplate.php
+ create mode 100644 src/Group_TaskTemplate.php
+ create mode 100644 src/ITILFollowupTemplate_User.php
+ create mode 100644 src/Profile_ITILFollowupTemplate.php
+ create mode 100644 src/Profile_SolutionTemplate.php
+ create mode 100644 src/Profile_TaskTemplate.php
+ create mode 100644 src/SavedSearch_UserTarget.php
+ create mode 100644 src/SolutionTemplate_User.php
+ create mode 100644 src/TaskTemplate_User.php
+ create mode 100644 targets.sql
+
+diff --git a/ajax/subvisibility.php b/ajax/subvisibility.php
+index a520722..4fed229 100644
+--- a/ajax/subvisibility.php
++++ b/ajax/subvisibility.php
+@@ -63,6 +63,12 @@ if (
+             if (Session::canViewAllEntities()) {
+                 $params['toadd'] = [-1 => __('No restriction')];
+             }
++            if (isset($_POST['entity']) && $_POST['entity'] >= 0) {
++                $params['entity'] = $_POST['entity'];
++                if (isset($_POST['entity_sons'])) {
++                    $params['entity_sons'] = $_POST['entity_sons'];
++                }
++            }
+             echo "<table class='tab_format'><tr><td>";
+             echo Entity::getTypeName(1);
+             echo "</td><td>";
+diff --git a/ajax/visibility.php b/ajax/visibility.php
+index 08f083a..fb74f4a 100644
+--- a/ajax/visibility.php
++++ b/ajax/visibility.php
+@@ -46,10 +46,7 @@ if (strpos($_SERVER['PHP_SELF'], "visibility.php")) {
+ 
+ Session::checkCentralAccess();
+ 
+-if (
+-    isset($_POST['type']) && !empty($_POST['type'])
+-    && isset($_POST['right'])
+-) {
++if (isset($_POST['type']) && !empty($_POST['type'])) {
+     $display = false;
+     $rand    = mt_rand();
+     $prefix = '';
+@@ -65,10 +62,19 @@ if (
+     switch ($_POST['type']) {
+         case 'User':
+             echo "<td>";
+-            $params = [
+-                'right' => isset($_POST['allusers']) ? 'all' : $_POST['right'],
+-                'name' => $prefix . 'users_id' . $suffix
+-            ];
++            $params = ['name' => $prefix . 'users_id' . $suffix];
++            if (isset($_POST['right'])) {
++                $params['right'] = isset($_POST['allusers']) ? 'all' : $_POST['right'];
++            } else {
++                $params['right'] = 'all';
++            }
++            if (isset($_POST['entity']) && $_POST['entity'] >= 0) {
++                $params['entity'] = $_POST['entity'];
++                if (isset($_POST['entity_sons'])) {
++                    $params['entity_sons'] = $_POST['entity_sons'];
++                }
++            }
++
+             User::dropdown($params);
+             echo "</td>";
+             $display = true;
+@@ -88,6 +94,14 @@ if (
+                     'prefix'   => $_POST['prefix']
+                 ]
+             ];
++            if (isset($_POST['entity']) && $_POST['entity'] >= 0) {
++                $params['entity'] = $_POST['entity'];
++                $params['toupdate']['moreparams']['entity'] = $_POST['entity'];
++                if (isset($_POST['entity_sons'])) {
++                    $params['entity_sons'] = $_POST['entity_sons'];
++                    $params['toupdate']['moreparams']['entity_sons'] = $_POST['entity_sons'];
++                }
++            }
+ 
+             Group::dropdown($params);
+             echo "</td><td>";
+@@ -98,34 +112,58 @@ if (
+ 
+         case 'Entity':
+             echo "<td>";
+-            Entity::dropdown(['entity' => $_SESSION['glpiactiveentities'],
++            $entityParams = [
+                 'value'  => $_SESSION['glpiactive_entity'],
+-                'name'   => $prefix . 'entities_id' . $suffix
+-            ]);
++                'name'   => $prefix . 'entities_id' . $suffix,
++            ];
++
++            // remove entities which can not access the item from the possible targets
++            if (isset($_POST['entity'])) {
++                $entityParams['entity'] = $_POST['entity'];
++                if (isset($_POST['entity_sons'])) {
++                    $entityParams['entity_sons'] = $_POST['entity_sons'];
++                }
++            } else {
++                $entityParams['entity'] = $_SESSION['glpiactiveentities'];
++            }
++
++            Entity::dropdown($entityParams);
+             echo "</td><td>";
+             echo __('Child entities');
+             echo "</td><td>";
+-            Dropdown::showYesNo($prefix . 'is_recursive' . $suffix);
++            if (isset($_POST['entity_sons']) && !$_POST['entity_sons']) {
++                __('No');
++                echo Html::hidden(
++                    $prefix . 'is_recursive' . $suffix,
++                    ['value' => 0]
++                );
++            } else {
++                Dropdown::showYesNo($prefix . 'is_recursive' . $suffix);
++            }
+             echo "</td>";
+             $display = true;
+             break;
+ 
+         case 'Profile':
+             echo "<td>";
+-            $checkright   = (READ | CREATE | UPDATE | PURGE);
+-            $righttocheck = $_POST['right'];
+-            if ($_POST['right'] == 'faq') {
+-                $righttocheck = 'knowbase';
+-                $checkright   = KnowbaseItem::READFAQ;
+-            }
+             $params             = [
+                 'rand'      => $rand,
+-                'name'      => $prefix . 'profiles_id' . $suffix,
+-                'condition' => [
++                'name'      => $prefix . 'profiles_id' . $suffix
++            ];
++
++            $righttocheck = isset($_POST['right']) ? $_POST['right'] : null;
++            if ($righttocheck) {
++                $checkright   = (READ | CREATE | UPDATE | PURGE);
++                if ($_POST['right'] == 'faq') {
++                    $righttocheck = 'knowbase';
++                    $checkright   = KnowbaseItem::READFAQ;
++                }
++                $params['condition'] = [
+                     'glpi_profilerights.name'     => $righttocheck,
+                     'glpi_profilerights.rights'   => ['&', $checkright]
+-                ]
+-            ];
++                ];
++            }
++
+             $params['toupdate'] = ['value_fieldname'
+                                                   => 'value',
+                 'to_update'  => "subvisibility$rand",
+@@ -135,6 +173,14 @@ if (
+                     'prefix'   => $_POST['prefix']
+                 ]
+             ];
++            if (isset($_POST['entity']) && $_POST['entity'] >= 0) {
++                $params['entity'] = $_POST['entity'];
++                $params['toupdate']['moreparams']['entity'] = $_POST['entity'];
++                if (isset($_POST['entity_sons'])) {
++                    $params['entity_sons'] = $_POST['entity_sons'];
++                    $params['toupdate']['moreparams']['entity_sons'] = $_POST['entity_sons'];
++                }
++            }
+ 
+             Profile::dropdown($params);
+             echo "</td><td>";
+diff --git a/front/dropdown.common.form.php b/front/dropdown.common.form.php
+index b9bb933..b26811d 100644
+--- a/front/dropdown.common.form.php
++++ b/front/dropdown.common.form.php
+@@ -166,6 +166,60 @@ if (isset($_POST["add"])) {
+     );
+     $dropdown->showForm($_GET["id"]);
+     Html::popFooter();
++} else if (isset($_POST["addvisibility"])) {
++    if (
++        isset($_POST["_type"]) && !empty($_POST["_type"])
++        && isset($_POST[$dropdown::getForeignKeyField()]) && $_POST[$dropdown::getForeignKeyField()]
++    ) {
++        if (array_key_exists('entities_id', $_POST) && $_POST['entities_id'] == -1) {
++            // "No restriction" value selected
++            $_POST['entities_id'] = 'NULL';
++            $_POST['no_entity_restriction'] = 1;
++        }
++        $item = null;
++        switch ($_POST["_type"]) {
++            case 'User':
++                if (isset($_POST['users_id']) && $_POST['users_id']) {
++                    $class = $dropdown->getType() . '_' . 'User';
++                    $item = new $class();
++                }
++                break;
++
++            case 'Group':
++                if (isset($_POST['groups_id']) && $_POST['groups_id']) {
++                    $class = 'Group' . '_' . $dropdown->getType();
++                    $item = new $class();
++                }
++                break;
++
++            case 'Profile':
++                if (isset($_POST['profiles_id']) && $_POST['profiles_id']) {
++                    $class = 'Profile' . '_' . $dropdown->getType();
++                    $item = new $class();
++                }
++                break;
++
++            case 'Entity':
++                if (isset($_POST['entities_id'])) {
++                    $class = 'Entity' . '_' . $dropdown->getType();
++                    $item = new $class();
++                }
++                break;
++        }
++
++        if (!is_null($item)) {
++            $item->add($_POST);
++            Event::log(
++                $_POST[$dropdown::getForeignKeyField()],
++                $dropdown->getType(),
++                4,
++                "tools",
++                //TRANS: %s is the user login
++                sprintf(__('%s adds a target'), $_SESSION["glpiname"])
++            );
++        }
++    }
++    Html::back();
+ } else {
+     if (!isset($options)) {
+         $options = [];
+diff --git a/front/savedsearch.form.php b/front/savedsearch.form.php
+index 11dd11b..f4230e9 100644
+--- a/front/savedsearch.form.php
++++ b/front/savedsearch.form.php
+@@ -33,6 +33,8 @@
+  * ---------------------------------------------------------------------
+  */
+ 
++use Glpi\Event;
++
+ include('../inc/includes.php');
+ 
+ if (!isset($_GET["id"])) {
+@@ -67,6 +69,44 @@ if (isset($_POST["add"])) {
+     $savedsearch->check($_GET['id'], UPDATE);
+     $savedsearch->createNotif();
+     Html::back();
++} else if (isset($_POST["addvisibility"])) {
++    if (
++        isset($_POST["_type"]) && !empty($_POST["_type"])
++        && isset($_POST["savedsearches_id"]) && $_POST["savedsearches_id"]
++    ) {
++        if (array_key_exists('entities_id', $_POST) && $_POST['entities_id'] == -1) {
++            // "No restriction" value selected
++            $_POST['entities_id'] = 'NULL';
++            $_POST['no_entity_restriction'] = 1;
++        }
++        $item = null;
++        switch ($_POST["_type"]) {
++            case 'User':
++                if (isset($_POST['users_id']) && $_POST['users_id']) {
++                    $item = new SavedSearch_UserTarget();
++                    $_POST['itemtype'] = $savedsearch->getType();
++                }
++                break;
++
++            case 'Group':
++                if (isset($_POST['groups_id']) && $_POST['groups_id']) {
++                    $item = new Group_SavedSearch();
++                }
++                break;
++        }
++        if (!is_null($item)) {
++            $item->add($_POST);
++            Event::log(
++                $_POST["savedsearches_id"],
++                "savedsearch",
++                4,
++                "tools",
++                //TRANS: %s is the user login
++                sprintf(__('%s adds a target'), $_SESSION["glpiname"])
++            );
++        }
++    }
++    Html::back();
+ } else {
+     $menus = [
+         'central'  => ['tools', 'savedsearch'],
+diff --git a/inc/define.php b/inc/define.php
+index 6da9dae..1311ade 100644
+--- a/inc/define.php
++++ b/inc/define.php
+@@ -462,7 +462,7 @@ $CFG_GLPI['user_pref_field'] = ['backcreated', 'csv_delimiter', 'date_format',
+     'priority_2', 'priority_3', 'priority_4', 'priority_5',
+     'priority_6', 'refresh_views', 'set_default_tech',
+     'set_default_requester', 'show_count_on_tabs',
+-    'show_jobs_at_login', 'task_private', 'task_state',
++    'show_jobs_at_login', 'task_private', 'task_state', 'planned_task_state',
+     'use_flat_dropdowntree', 'use_flat_dropdowntree_on_search_result', 'palette', 'page_layout',
+     'highcontrast_css', 'default_dashboard_central', 'default_dashboard_assets',
+     'default_dashboard_helpdesk', 'default_dashboard_mini_ticket', 'default_central_tab',
+diff --git a/install/empty_data.php b/install/empty_data.php
+index 8c860b7..0f3387b 100644
+--- a/install/empty_data.php
++++ b/install/empty_data.php
+@@ -278,6 +278,7 @@ $empty_data_builder = new class
+             'attach_ticket_documents_to_mail' => '0',
+             'backcreated' => '0',
+             'task_state' => '1',
++            'planned_task_state' => '1',
+             'palette' => 'auror',
+             'page_layout' => 'vertical',
+             'fold_menu' => '0',
+diff --git a/src/AbstractITILChildTemplate.php b/src/AbstractITILChildTemplate.php
+index 64f7355..aebc578 100644
+--- a/src/AbstractITILChildTemplate.php
++++ b/src/AbstractITILChildTemplate.php
+@@ -43,6 +43,251 @@ use Glpi\ContentTemplates\TemplateManager;
+  */
+ abstract class AbstractITILChildTemplate extends CommonDropdown
+ {
++    use CommonDBVisible {
++        CommonDBVisible::haveVisibilityAccess as traitHaveVisibilityAccess;
++    }
++
++    public function haveVisibilityAccess()
++    {
++        if (!self::canView()) {
++            return false;
++        }
++
++        return $this->traitHaveVisibilityAccess();
++    }
++
++    /**
++     * Return visibility joins to add to SQL
++     *
++     * @param $forceall force all joins (false by default)
++     *
++     * @return string joins to add
++     **/
++    public static function addVisibilityJoins($forceall = false)
++    {
++        //not deprecated because used in Search
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        //get and clean criteria
++        $criteria = self::getVisibilityCriteria();
++        unset($criteria['WHERE']);
++        $criteria['FROM'] = self::getTable();
++
++        $it = new \DBmysqlIterator(null);
++        $it->buildQuery($criteria);
++        $sql = $it->getSql();
++        $sql = trim(str_replace(
++            'SELECT * FROM ' . $DB->quoteName(self::getTable()),
++            '',
++            $sql
++        ));
++        return $sql;
++    }
++
++    /**
++     * Class for Group type target
++     * @return string
++     */
++    public function getGroupClass() {
++        return 'Group_' . $this->getType();
++    }
++
++    /**
++     * Class for User type target
++     * @return string
++     */
++    public function getUserClass() {
++        return $this->getType() . '_User';
++    }
++
++    /**
++     * Class for Profile type target
++     * @return string
++     */
++    public function getProfileClass() {
++        return 'Profile_' . $this->getType();
++    }
++
++    /**
++     * Class for Profile type target
++     * @return string
++     */
++    public function getEntityClass() {
++        return 'Entity_' . $this->getType();
++    }
++
++    public static function getTypes()
++    {
++        return ['User', 'Group', 'Profile', 'Entity'];
++    }
++
++    public function post_getFromDB()
++    {
++        // Groups
++        $this->groups   = $this->getGroupClass()::getGroups($this);
++
++        // Users
++        $this->users    = $this->getUserClass()::getUsers($this);
++
++        // Profiles
++        $this->profiles   = $this->getProfileClass()::getProfiles($this);
++
++        // Entities
++        $this->entities   = $this->getEntityClass()::getEntities($this);
++    }
++
++    public function getTabNameForItem(CommonGLPI $item, $withtemplate = 0)
++    {
++
++        if (self::canView()) {
++            $nb = 0;
++            switch ($item->getType()) {
++                case self::getType():
++                    if (Session::haveRight(self::$rightname, CREATE)) {
++                        if ($_SESSION['glpishow_count_on_tabs']) {
++                            $nb = $item->countVisibilities();
++                        }
++                        return [
++                            1 => self::createTabEntry(
++                                _n(
++                                    'Target',
++                                    'Targets',
++                                    Session::getPluralNumber()
++                                ),
++                                $nb
++                            )
++                        ];
++                    }
++                    break;
++            }
++        }
++        return '';
++    }
++
++    public function defineTabs($options = [])
++    {
++
++        $ong = parent::defineTabs();
++        $this->addStandardTab(self::getType(), $ong, $options);
++        return $ong;
++    }
++
++    /**
++     * @param $item         CommonGLPI object
++     * @param $tabnum       (default 1)
++     * @param $withtemplate (default 0)
++     **/
++    public static function displayTabContentForItem(CommonGLPI $item, $tabnum = 1, $withtemplate = 0)
++    {
++
++        switch ($item->getType()) {
++            case self::getType():
++                $item->showVisibility();
++                return true;
++        }
++        return false;
++    }
++
++    public function cleanDBonPurge()
++    {
++        parent::cleanDBonPurge();
++        $this->deleteChildrenAndRelationsFromDb([
++            $this->getUserClass(),
++            $this->getGroupClass(),
++            $this->getProfileClass(),
++            $this->getEntityClass()
++        ]);
++    }
++
++    /**
++     * Get value of "condition" option passed to ajax/getDropdownValue to apply target restrictions
++     * @return array
++     */
++    public function getDropdownCondition() {
++        $table = $this->getTable();
++        $fkField = self::getForeignKeyField();
++
++        $where = [
++            'OR' => [
++                $this->getUserClass()::getTable() . '.users_id' => Session::getLoginUserID(),
++                [
++                    $this->getGroupClass()::getTable() . '.groups_id' => count($_SESSION["glpigroups"])
++                        ? $_SESSION["glpigroups"]
++                        : [-1],
++                    'OR' => [
++                        [$this->getGroupClass()::getTable() . '.no_entity_restriction' => 1],
++                        getEntitiesRestrictCriteria(
++                            $this->getGroupClass()::getTable(),
++                            '',
++                            $_SESSION['glpiactiveentities'],
++                            true
++                        )
++                    ]
++                ],
++                [
++                    $this->getProfileClass()::getTable() . '.profiles_id' => $_SESSION["glpiactiveprofile"]['id'],
++                    'OR' => [
++                        $this->getProfileClass()::getTable() . '.no_entity_restriction' => 1,
++                        getEntitiesRestrictCriteria(
++                            $this->getProfileClass()::getTable(),
++                            '',
++                            $_SESSION['glpiactiveentities'],
++                            true
++                        )
++                    ]
++                ]
++            ]
++        ];
++
++        $restrict = getEntitiesRestrictCriteria($this->getEntityClass()::getTable(), '', '', true, true);
++        if (count($restrict)) {
++            $where['OR'] = $where['OR'] + $restrict;
++        }
++
++        return [
++            'WHERE' => $where,
++            'LEFT JOIN' => [
++                $this->getUserClass()::getTable() => [
++                    'ON' => [
++                        $this->getUserClass()::getTable() => $fkField,
++                        $table => 'id'
++                    ]
++                ],
++                $this->getGroupClass()::getTable() => [
++                    'ON' => [
++                        $this->getGroupClass()::getTable() => $fkField,
++                        $table => 'id'
++                    ]
++                ],
++                $this->getProfileClass()::getTable() => [
++                    'ON' => [
++                        $this->getProfileClass()::getTable() => $fkField,
++                        $table => 'id'
++                    ]
++                ],
++                $this->getEntityClass()::getTable() => [
++                    'ON' => [
++                        $this->getEntityClass()::getTable() => $fkField,
++                        $table => 'id'
++                    ]
++                ],
++            ],
++            'ORDERBY' => [
++                'itemtype',
++                'name'
++            ]
++        ];
++    }
++
++    /**
++     * No specific right needed to be a target
++     * @return false
++     */
++    public function getVisibilityRight() {
++        return false;
++    }
++
+     public function showForm($ID, array $options = [])
+     {
+         if (!parent::showForm($ID, $options)) {
+diff --git a/src/CommonDBVisible.php b/src/CommonDBVisible.php
+index 3a6e1eb..203425d 100644
+--- a/src/CommonDBVisible.php
++++ b/src/CommonDBVisible.php
+@@ -36,8 +36,14 @@
+ /**
+  * Common DataBase visibility for items
+  */
+-abstract class CommonDBVisible extends CommonDBTM
++trait CommonDBVisible
+ {
++    /**
++     * Types of target available for the itemtype
++     * @var string[]
++     */
++    public static $types = ['Entity', 'Group', 'Profile', 'User'];
++
+     /**
+      * Entities on which item is visible.
+      * Keys are ID, values are DB fields values.
+@@ -119,7 +125,7 @@ abstract class CommonDBVisible extends CommonDBTM
+     public function haveVisibilityAccess()
+     {
+        // Author
+-        if ($this->fields['users_id'] == Session::getLoginUserID()) {
++        if (isset($this->fields['users_id']) && $this->fields['users_id'] == Session::getLoginUserID()) {
+             return true;
+         }
+        // Users
+@@ -202,6 +208,22 @@ abstract class CommonDBVisible extends CommonDBTM
+               + count($this->profiles));
+     }
+ 
++    /**
++     * Get right which will be used to determine which users can be targeted
++     * @return string
++     */
++    public function getVisibilityRight() {
++        return strtolower($this::getType()) . '_public';
++    }
++
++    /**
++     * List of target types available for the object
++     * @return string[]
++     */
++    public static function getTypes() {
++        return self::$types;
++    }
++
+     /**
+      * Show visibility configuration
+      *
+@@ -230,7 +252,7 @@ abstract class CommonDBVisible extends CommonDBTM
+             echo "<tr class='tab_bg_1'><th colspan='4'>" . __('Add a target') . "</tr>";
+             echo "<tr class='tab_bg_1'><td class='tab_bg_2' width='100px'>";
+ 
+-            $types   = ['Entity', 'Group', 'Profile', 'User'];
++            $types   = static::getTypes();
+ 
+             $addrand = Dropdown::showItemTypes('_type', $types);
+             $params = $this->getShowVisibilityDropdownParams();
+@@ -260,7 +282,7 @@ abstract class CommonDBVisible extends CommonDBTM
+                               => ['delete' => _x('button', 'Delete permanently')]
+             ];
+ 
+-            if ($this->fields['users_id'] != Session::getLoginUserID()) {
++            if (isset($this->fields['users_id']) && $this->fields['users_id'] != Session::getLoginUserID()) {
+                 $massiveactionparams['confirm']
+                 = __('Caution! You are not the author of this element. Delete targets can result in loss of access to that element.');
+             }
+@@ -289,7 +311,8 @@ abstract class CommonDBVisible extends CommonDBTM
+                     echo "<tr class='tab_bg_1'>";
+                     if ($canedit) {
+                         echo "<td>";
+-                        Html::showMassiveActionCheckBox($this::getType() . '_User', $data["id"]);
++                        $itemtype = $this::getType() != SavedSearch::getType() ? $this::getType() . '_User' : $this::getType() . '_UserTarget';
++                        Html::showMassiveActionCheckBox($itemtype, $data["id"]);
+                         echo "</td>";
+                     }
+                     echo "<td>" . User::getTypeName(1) . "</td>";
+@@ -434,9 +457,16 @@ abstract class CommonDBVisible extends CommonDBTM
+      */
+     protected function getShowVisibilityDropdownParams()
+     {
+-        return [
+-            'type'  => '__VALUE__',
+-            'right' => strtolower($this::getType()) . '_public'
+-        ];
++        $params = ['type'  => '__VALUE__'];
++        if ($right = $this->getVisibilityRight()) {
++            $params['right'] = $right;
++        }
++        if (isset($this->fields['entities_id'])) {
++            $params['entity'] = $this->fields['entities_id'];
++            if (isset($this->fields['is_recursive'])) {
++                $params['entity_sons'] = $this->fields['is_recursive'];
++            }
++        }
++        return $params;
+     }
+ }
+diff --git a/src/CommonITILObject.php b/src/CommonITILObject.php
+index 2715780..fae8631 100644
+--- a/src/CommonITILObject.php
++++ b/src/CommonITILObject.php
+@@ -6861,6 +6861,7 @@ abstract class CommonITILObject extends CommonDBTM
+             'icon'          => ITILFollowup::getIcon(),
+             'label'         => _x('button', 'Answer'),
+             'short_label'   => _x('button', 'Answer'),
++            'template_obj' => new ITILFollowupTemplate(),
+             'template'      => 'components/itilobject/timeline/form_followup.html.twig',
+             'item'          => $fup,
+             'hide_in_menu'  => !$canadd_fup
+@@ -6871,6 +6872,7 @@ abstract class CommonITILObject extends CommonDBTM
+             'icon'          => CommonITILTask::getIcon(),
+             'label'         => _x('button', 'Create a task'),
+             'short_label'   => _x('button', 'Task'),
++            'template_obj' => new TaskTemplate(),
+             'template'      => 'components/itilobject/timeline/form_task.html.twig',
+             'item'          => $task,
+             'hide_in_menu'  => !$canadd_task
+@@ -6881,6 +6883,7 @@ abstract class CommonITILObject extends CommonDBTM
+             'icon'          => ITILSolution::getIcon(),
+             'label'         => _x('button', 'Add a solution'),
+             'short_label'   => _x('button', 'Solution'),
++            'template_obj' => new SolutionTemplate(),
+             'template'      => 'components/itilobject/timeline/form_solution.html.twig',
+             'item'          => new ITILSolution(),
+             'hide_in_menu'  => !$canadd_solution
+@@ -6891,6 +6894,7 @@ abstract class CommonITILObject extends CommonDBTM
+             'icon'          => Document_Item::getIcon(),
+             'label'         => _x('button', 'Add a document'),
+             'short_label'   => _x('button', 'Document'),
++            'template_obj' => null,
+             'template'      => 'components/itilobject/timeline/form_document_item.html.twig',
+             'item'          => new Document_Item(),
+             'hide_in_menu'  => !$canadd_document
+diff --git a/src/CommonITILTask.php b/src/CommonITILTask.php
+index fbd143c..070f700 100644
+--- a/src/CommonITILTask.php
++++ b/src/CommonITILTask.php
+@@ -1168,6 +1168,16 @@ abstract class CommonITILTask extends CommonDBTM implements CalDAVCompatibleItem
+                 $item->getTable() . '.begin'   => ['<=', $end]
+             ];
+         }
++
++        if (isset($options['not_done']) && $options['not_done']) {
++            $WHERE[] = [
++                $item->getTable() . '.state' => ['!=', Planning::DONE],
++                'NOT' => [
++                    $parentitem->getTable() . '.status' => [CommonITILObject::CLOSED, CommonITILObject::SOLVED]
++                ]
++            ];
++        }
++
+         $ADDWHERE = [];
+ 
+         if ($whogroup === "mine") {
+diff --git a/src/Config.php b/src/Config.php
+index ef71bd7..6c776ed 100644
+--- a/src/Config.php
++++ b/src/Config.php
+@@ -1391,14 +1391,8 @@ class Config extends CommonDBTM
+ 
+             echo "<tr class='tab_bg_2'><td><label for='dropdown_task_state$rand'>" . __('Tasks state by default') . "</label></td><td>";
+             Planning::dropdownState("task_state", $data["task_state"], true, ['rand' => $rand]);
+-            echo "</td><td><label for='dropdown_refresh_views$rand'>" . __('Automatically refresh data (tickets list, project kanban) in minutes.') . "</label></td><td>";
+-            Dropdown::showNumber('refresh_views', ['value' => $data["refresh_views"],
+-                'min'   => 1,
+-                'max'   => 30,
+-                'step'  => 1,
+-                'toadd' => [0 => __('Never')],
+-                'rand'  => $rand
+-            ]);
++            echo "</td><td><label for='dropdown_task_state$rand'>" . __('Planned Tasks default state') . "</label></td><td>";
++            Planning::dropdownState("planned_task_state", $data["planned_task_state"], true, ['rand' => $rand]);
+             echo "</td></tr>";
+ 
+             echo "<tr class='tab_bg_2'><td><label for='dropdown_set_default_tech$rand'>" . __('Pre-select me as a technician when creating a ticket') .
+@@ -1424,7 +1418,14 @@ class Config extends CommonDBTM
+                 'value' => $data['timeline_action_btn_layout'],
+                 'rand' => $rand
+             ]);
+-            echo "</td><td></td></tr>";
++            echo "</td><td><label for='dropdown_refresh_views$rand'>" . __('Automatically refresh data (tickets list, project kanban) in minutes.') . "</label></td><td>";
++            Dropdown::showNumber('refresh_views', ['value' => $data["refresh_views"],
++                'min'   => 1,
++                'max'   => 30,
++                'step'  => 1,
++                'toadd' => [0 => __('Never')],
++                'rand'  => $rand
++            ]);
+             echo "</td></tr>";
+ 
+             echo "<tr class='tab_bg_2'><td><label for='timeline_date_format$rand'>" . __('Timeline date display') .
+diff --git a/src/Entity_ITILFollowupTemplate.php b/src/Entity_ITILFollowupTemplate.php
+new file mode 100644
+index 0000000..8852c35
+--- /dev/null
++++ b/src/Entity_ITILFollowupTemplate.php
+@@ -0,0 +1,71 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class Entity_ITILFollowupTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'ITILFollowupTemplate';
++    public static $items_id_1          = 'itilfollowuptemplates_id';
++    public static $itemtype_2          = 'Entity';
++    public static $items_id_2          = 'entities_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++
++    /**
++     * @param ITILFollowupTemplate $template ITILFollowupTemplate instance
++     *
++     * @return array of entities
++     **/
++    public static function getEntities($template)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $ent   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $template->fields['id']
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $ent[$data[self::$items_id_2]][] = $data;
++        }
++        return $ent;
++    }
++}
+diff --git a/src/Entity_SolutionTemplate.php b/src/Entity_SolutionTemplate.php
+new file mode 100644
+index 0000000..cf35bd6
+--- /dev/null
++++ b/src/Entity_SolutionTemplate.php
+@@ -0,0 +1,71 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class Entity_SolutionTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'SolutionTemplate';
++    public static $items_id_1          = 'solutiontemplates_id';
++    public static $itemtype_2          = 'Entity';
++    public static $items_id_2          = 'entities_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++
++    /**
++     * @param SolutionTemplate $template SolutionTemplate instance
++     *
++     * @return array of entities
++     **/
++    public static function getEntities($template)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $ent   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $template->fields['id']
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $ent[$data[self::$items_id_2]][] = $data;
++        }
++        return $ent;
++    }
++}
+diff --git a/src/Entity_TaskTemplate.php b/src/Entity_TaskTemplate.php
+new file mode 100644
+index 0000000..02551f0
+--- /dev/null
++++ b/src/Entity_TaskTemplate.php
+@@ -0,0 +1,71 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class Entity_TaskTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'TaskTemplate';
++    public static $items_id_1          = 'tasktemplates_id';
++    public static $itemtype_2          = 'Entity';
++    public static $items_id_2          = 'entities_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++
++    /**
++     * @param TaskTemplate $template TaskTemplate instance
++     *
++     * @return array of entities
++     **/
++    public static function getEntities($template)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $ent   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $template->fields['id']
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $ent[$data[self::$items_id_2]][] = $data;
++        }
++        return $ent;
++    }
++}
+diff --git a/src/Features/PlanningEvent.php b/src/Features/PlanningEvent.php
+index fa1bd17..ee3937f 100644
+--- a/src/Features/PlanningEvent.php
++++ b/src/Features/PlanningEvent.php
+@@ -510,6 +510,11 @@ trait PlanningEvent
+             $WHERE['state'] = ['!=', Planning::INFO];
+         }
+ 
++        if (isset($options['not_done']) && $options['not_done']) {
++            $options['display_done_events'] = false;
++            $WHERE[] = ['state'  => ['!=', Planning::DONE]];
++        }
++
+         if (!$options['display_done_events']) {
+             $WHERE[] = [
+                 'OR' => [
+diff --git a/src/Group_ITILFollowupTemplate.php b/src/Group_ITILFollowupTemplate.php
+new file mode 100644
+index 0000000..828ec2e
+--- /dev/null
++++ b/src/Group_ITILFollowupTemplate.php
+@@ -0,0 +1,66 @@
++<?php
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++class Group_ITILFollowupTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'ITILFollowupTemplate';
++    public static $items_id_1          = 'itilfollowuptemplates_id';
++    public static $itemtype_2          = 'Group';
++    public static $items_id_2          = 'groups_id';
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++    /**
++     * Get groups for a itilfollowup template
++     *
++     * @param ITILFollowupTemplate $itilfollowupTemplate ITILFollowupTemplate instance
++     *
++     * @return array
++     **/
++    public static function getGroups(ITILFollowupTemplate $itilfollowupTemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $itilfollowupTemplate->getID()
++            ]
++        ]);
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/src/Group_SavedSearch.php b/src/Group_SavedSearch.php
+new file mode 100644
+index 0000000..78cc69a
+--- /dev/null
++++ b/src/Group_SavedSearch.php
+@@ -0,0 +1,73 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class Group_SavedSearch extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'SavedSearch';
++    public static $items_id_1          = 'savedsearches_id';
++    public static $itemtype_2          = 'Group';
++    public static $items_id_2          = 'groups_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++
++    /**
++     * Get groups for a saved search
++     *
++     * @param SavedSearch $savedSearch SavedSearch instance
++     *
++     * @return array of groups linked to a saved search
++     **/
++    public static function getGroups(SavedSearch $savedSearch)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $savedSearch->getID()
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/src/Group_SolutionTemplate.php b/src/Group_SolutionTemplate.php
+new file mode 100644
+index 0000000..d5b0583
+--- /dev/null
++++ b/src/Group_SolutionTemplate.php
+@@ -0,0 +1,73 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class Group_SolutionTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'SolutionTemplate';
++    public static $items_id_1          = 'solutiontemplates_id';
++    public static $itemtype_2          = 'Group';
++    public static $items_id_2          = 'groups_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++
++    /**
++     * Get groups for a solution template
++     *
++     * @param SolutionTemplate $solutionTemplate SolutionTemplate instance
++     *
++     * @return array
++     **/
++    public static function getGroups(SolutionTemplate $solutionTemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $solutionTemplate->getID()
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/src/Group_TaskTemplate.php b/src/Group_TaskTemplate.php
+new file mode 100644
+index 0000000..9f403e3
+--- /dev/null
++++ b/src/Group_TaskTemplate.php
+@@ -0,0 +1,66 @@
++<?php
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++class Group_TaskTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'TaskTemplate';
++    public static $items_id_1          = 'tasktemplates_id';
++    public static $itemtype_2          = 'Group';
++    public static $items_id_2          = 'groups_id';
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++    /**
++     * Get groups for a task template
++     *
++     * @param TaskTemplate $taskTemplate TaskTemplate instance
++     *
++     * @return array
++     **/
++    public static function getGroups(TaskTemplate $taskTemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $taskTemplate->getID()
++            ]
++        ]);
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/src/ITILFollowupTemplate_User.php b/src/ITILFollowupTemplate_User.php
+new file mode 100644
+index 0000000..5d02861
+--- /dev/null
++++ b/src/ITILFollowupTemplate_User.php
+@@ -0,0 +1,66 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++class ITILFollowupTemplate_User extends CommonDBRelation
++{
++    public $auto_message_on_action = false;
++    public static $itemtype_1          = 'ITILFollowupTemplate';
++    public static $items_id_1          = 'itilfollowuptemplates_id';
++    public static $itemtype_2          = 'User';
++    public static $items_id_2          = 'users_id';
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++    /**
++     * @param ITILFollowupTemplate $itilfollowupTemplate ITILFollowupTemplate instance
++     *
++     * @return array
++     **/
++    public static function getUsers(ITILFollowupTemplate $itilfollowupTemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $itilfollowupTemplate->getID()
++            ]
++        ]);
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/src/KnowbaseItem.php b/src/KnowbaseItem.php
+index f1c5a0f..2778b81 100644
+--- a/src/KnowbaseItem.php
++++ b/src/KnowbaseItem.php
+@@ -40,8 +40,11 @@ use Glpi\Toolbox\Sanitizer;
+ /**
+  * KnowbaseItem Class
+  **/
+-class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
++class KnowbaseItem extends CommonDBTM implements ExtraVisibilityCriteria
+ {
++    use CommonDBVisible {
++        CommonDBVisible::haveVisibilityAccess as traitHaveVisibilityAccess;
++    }
+     use Glpi\Features\Clonable;
+ 
+    // From CommonDBTM
+@@ -510,7 +513,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
+             return true;
+         }
+ 
+-        return parent::haveVisibilityAccess();
++        return $this->traitHaveVisibilityAccess();
+     }
+ 
+     /**
+diff --git a/src/Planning.php b/src/Planning.php
+index 40ec34b..f5a32f8 100644
+--- a/src/Planning.php
++++ b/src/Planning.php
+@@ -904,7 +904,7 @@ JAVASCRIPT;
+ 
+         return array_merge(
+             $CFG_GLPI['planning_types'],
+-            ['NotPlanned', 'OnlyBgEvents']
++            ['NotPlanned', 'OnlyBgEvents', 'NotDone']
+         );
+     }
+ 
+@@ -936,11 +936,11 @@ JAVASCRIPT;
+         $filters = &$_SESSION['glpi_plannings']['filters'];
+         $index_color = 0;
+         foreach (self::getPlanningTypes() as $planning_type) {
+-            if (in_array($planning_type, ['NotPlanned', 'OnlyBgEvents']) || $planning_type::canView()) {
++            if (in_array($planning_type, ['NotPlanned', 'OnlyBgEvents', 'NotDone']) || $planning_type::canView()) {
+                 if (!isset($filters[$planning_type])) {
+                     $filters[$planning_type] = [
+                         'color'   => self::getPaletteColor('ev', $index_color),
+-                        'display' => !in_array($planning_type, ['NotPlanned', 'OnlyBgEvents']),
++                        'display' => !in_array($planning_type, ['NotPlanned', 'OnlyBgEvents', 'NotDone']),
+                         'type'    => 'event_filter'
+                     ];
+                 }
+@@ -1092,6 +1092,8 @@ JAVASCRIPT;
+                 $title = __('Not planned tasks');
+             } else if ($filter_key == 'OnlyBgEvents') {
+                 $title = __('Only background events');
++            } else if ($filter_key == 'NotDone') {
++                $title = __("Seulement les éléments non fait");
+             } else {
+                 if (!getItemForItemtype($filter_key)) {
+                     return false;
+@@ -1141,7 +1143,7 @@ JAVASCRIPT;
+ 
+         echo "<span class='ms-auto d-flex align-items-center'>";
+        // colors not for groups
+-        if ($filter_data['type'] != 'group_users' && $filter_key != 'OnlyBgEvents') {
++        if ($filter_data['type'] != 'group_users' && $filter_key != 'OnlyBgEvents' && $filter_key != 'NotDone') {
+             echo "<span class='color_input'>";
+             Html::showColorField(
+                 $filter_key . "_color",
+@@ -1666,6 +1668,12 @@ JAVASCRIPT;
+             $rand = $params['rand'];
+         }
+ 
++        if (isset($_SESSION['glpiplanned_task_state']) && CommonDBTM::isNewID($params['items_id']) && isset($params['rand'])) {
++            echo Html::scriptBlock(
++                "$('#dropdown_state" . $params['rand'] . "').trigger('setValue', " . $_SESSION['glpiplanned_task_state'] . ");"
++            );
++        }
++
+         $display_dates = $params['_display_dates'] ?? true;
+ 
+         $mintime = $CFG_GLPI["planning_begin"];
+@@ -2027,6 +2035,11 @@ JAVASCRIPT;
+         $param['begin'] = date("Y-m-d H:i:s", $time_begin);
+         $param['end']   = date("Y-m-d H:i:s", $time_end);
+ 
++        $param['not_done'] = false;
++        if ($_SESSION['glpi_plannings']['filters']['NotDone']['display']) {
++            $param['not_done'] = true;
++        }
++
+         $raw_events = [];
+         $not_planned = [];
+         foreach ($CFG_GLPI['planning_types'] as $planning_type) {
+diff --git a/src/Profile_ITILFollowupTemplate.php b/src/Profile_ITILFollowupTemplate.php
+new file mode 100644
+index 0000000..d77bceb
+--- /dev/null
++++ b/src/Profile_ITILFollowupTemplate.php
+@@ -0,0 +1,65 @@
++<?php
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++class Profile_ITILFollowupTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'ITILFollowupTemplate';
++    public static $items_id_1          = 'itilfollowuptemplates_id';
++    public static $itemtype_2          = 'Profile';
++    public static $items_id_2          = 'profiles_id';
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++    /**
++     * @param $itilfollowuptemplate ITILFollowupTemplate itilfollowup template
++     *
++     * @return array
++     **/
++    public static function getProfiles($itilfollowuptemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++        $prof  = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $itilfollowuptemplate->getID()
++            ]
++        ]);
++        foreach ($iterator as $data) {
++            $prof[$data['profiles_id']][] = $data;
++        }
++        return $prof;
++    }
++}
+diff --git a/src/Profile_SolutionTemplate.php b/src/Profile_SolutionTemplate.php
+new file mode 100644
+index 0000000..c4b954a
+--- /dev/null
++++ b/src/Profile_SolutionTemplate.php
+@@ -0,0 +1,74 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class Profile_SolutionTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'SolutionTemplate';
++    public static $items_id_1          = 'solutiontemplates_id';
++    public static $itemtype_2          = 'Profile';
++    public static $items_id_2          = 'profiles_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++
++    /**
++     * Get profiles for a solution template
++     *
++     * @param $solutiontemplate SolutionTemplate solution template
++     *
++     * @return array of profiles linked to a solution template
++     **/
++    public static function getProfiles($solutiontemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $prof  = [];
++
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $solutiontemplate->getID()
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $prof[$data['profiles_id']][] = $data;
++        }
++        return $prof;
++    }
++}
+diff --git a/src/Profile_TaskTemplate.php b/src/Profile_TaskTemplate.php
+new file mode 100644
+index 0000000..b370e97
+--- /dev/null
++++ b/src/Profile_TaskTemplate.php
+@@ -0,0 +1,66 @@
++<?php
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++class Profile_TaskTemplate extends CommonDBRelation
++{
++    // From CommonDBRelation
++    public static $itemtype_1          = 'TaskTemplate';
++    public static $items_id_1          = 'tasktemplates_id';
++    public static $itemtype_2          = 'Profile';
++    public static $items_id_2          = 'profiles_id';
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++    /**
++     * Get profiles for a task template
++     *
++     * @param $tasktemplate TaskTemplate task template
++     *
++     * @return array of profiles linked to a task template
++     **/
++    public static function getProfiles($tasktemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++        $prof  = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $tasktemplate->getID()
++            ]
++        ]);
++        foreach ($iterator as $data) {
++            $prof[$data['profiles_id']][] = $data;
++        }
++        return $prof;
++    }
++}
+diff --git a/src/RSSFeed.php b/src/RSSFeed.php
+index cae65d5..927e2d5 100644
+--- a/src/RSSFeed.php
++++ b/src/RSSFeed.php
+@@ -64,8 +64,11 @@ use Glpi\Toolbox\URL;
+  *
+  * @since 0.84
+  **/
+-class RSSFeed extends CommonDBVisible implements ExtraVisibilityCriteria
++class RSSFeed extends CommonDBTM implements ExtraVisibilityCriteria
+ {
++    use CommonDBVisible {
++        CommonDBVisible::haveVisibilityAccess as traitHaveVisibilityAccess;
++    }
+    // From CommonDBTM
+     public $dohistory                   = true;
+ 
+@@ -196,7 +199,7 @@ class RSSFeed extends CommonDBVisible implements ExtraVisibilityCriteria
+             return false;
+         }
+ 
+-        return parent::haveVisibilityAccess();
++        return $this->traitHaveVisibilityAccess();
+     }
+ 
+     /**
+diff --git a/src/Reminder.php b/src/Reminder.php
+index 97b9c57..438d49b 100644
+--- a/src/Reminder.php
++++ b/src/Reminder.php
+@@ -43,7 +43,7 @@ use Sabre\VObject\Component\VTodo;
+ /**
+  * Reminder Class
+  **/
+-class Reminder extends CommonDBVisible implements
++class Reminder extends CommonDBTM implements
+     CalDAVCompatibleItemInterface,
+     ExtraVisibilityCriteria
+ {
+@@ -52,6 +52,9 @@ class Reminder extends CommonDBVisible implements
+     }
+     use VobjectConverterTrait;
+     use Clonable;
++    use CommonDBVisible {
++        CommonDBVisible::haveVisibilityAccess as traitHaveVisibilityAccess;
++    }
+ 
+    // From CommonDBTM
+     public $dohistory                   = true;
+@@ -206,7 +209,7 @@ class Reminder extends CommonDBVisible implements
+             return false;
+         }
+ 
+-        return parent::haveVisibilityAccess();
++        return $this->traitHaveVisibilityAccess();
+     }
+ 
+     /**
+diff --git a/src/SavedSearch.php b/src/SavedSearch.php
+index 6b03692..fd4a166 100644
+--- a/src/SavedSearch.php
++++ b/src/SavedSearch.php
+@@ -47,6 +47,9 @@ use Glpi\Toolbox\Sanitizer;
+ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+ {
+     use Clonable;
++    use CommonDBVisible {
++        CommonDBVisible::haveVisibilityAccess as traitHaveVisibilityAccess;
++    }
+ 
+     public static $rightname               = 'bookmark_public';
+ 
+@@ -58,6 +61,11 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+     const COUNT_YES = 1;
+     const COUNT_AUTO = 2;
+ 
++    public static function getTypes()
++    {
++        return ['Group', 'User'];
++    }
++
+ 
+     public static function getForbiddenActionsForMenu()
+     {
+@@ -158,6 +166,44 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+         parent::processMassiveActionsForOneItemtype($ma, $item, $ids);
+     }
+ 
++    public function haveVisibilityAccess()
++    {
++        if (!self::canView()) {
++            return false;
++        }
++
++        return $this->traitHaveVisibilityAccess();
++    }
++
++    /**
++     * Return visibility joins to add to SQL
++     *
++     * @param $forceall force all joins (false by default)
++     *
++     * @return string joins to add
++     **/
++    public static function addVisibilityJoins($forceall = false)
++    {
++        //not deprecated because used in Search
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        //get and clean criteria
++        $criteria = self::getVisibilityCriteria();
++        unset($criteria['WHERE']);
++        $criteria['FROM'] = self::getTable();
++
++        $it = new \DBmysqlIterator(null);
++        $it->buildQuery($criteria);
++        $sql = $it->getSql();
++        $sql = trim(str_replace(
++            'SELECT * FROM ' . $DB->quoteName(self::getTable()),
++            '',
++            $sql
++        ));
++        return $sql;
++    }
++
+ 
+     public function canCreateItem()
+     {
+@@ -169,6 +215,41 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+         return parent::canCreateItem();
+     }
+ 
++    public function post_getFromDB()
++    {
++        // Group
++        $this->groups   = Group_SavedSearch::getGroups($this);
++
++        // Users
++        $this->users    = SavedSearch_UserTarget::getUsers($this);
++    }
++
++    public function getTabNameForItem(CommonGLPI $item, $withtemplate = 0)
++    {
++
++        if (self::canView()) {
++            $nb = 0;
++            switch ($item->getType()) {
++                case 'SavedSearch':
++                    if (Session::haveRight(self::$rightname, CREATE)) {
++                        if ($item->fields['is_private']) {
++                            if ($_SESSION['glpishow_count_on_tabs']) {
++                                $nb = $item->countVisibilities();
++                            }
++                            return [1 => self::createTabEntry(_n(
++                                'Target',
++                                'Targets',
++                                Session::getPluralNumber()
++                            ), $nb)
++                            ];
++                        }
++                    }
++                    break;
++            }
++        }
++        return '';
++    }
++
+ 
+     public function canViewItem()
+     {
+@@ -180,16 +261,31 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+         return parent::canViewItem();
+     }
+ 
+-
+     public function defineTabs($options = [])
+     {
+ 
+         $ong = [];
+-        $this->addDefaultFormTab($ong)
+-           ->addStandardTab('SavedSearch_Alert', $ong, $options);
++        $this->addDefaultFormTab($ong);
++        $this->addStandardTab('SavedSearch', $ong, $options);
++        $this->addStandardTab('SavedSearch_Alert', $ong, $options);
+         return $ong;
+     }
+ 
++    /**
++     * @param $item         CommonGLPI object
++     * @param $tabnum       (default 1)
++     * @param $withtemplate (default 0)
++     **/
++    public static function displayTabContentForItem(CommonGLPI $item, $tabnum = 1, $withtemplate = 0)
++    {
++
++        switch ($item->getType()) {
++            case 'SavedSearch':
++                $item->showVisibility();
++                return true;
++        }
++        return false;
++    }
+ 
+     public function rawSearchOptions()
+     {
+@@ -365,6 +461,8 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+             [
+                 SavedSearch_Alert::class,
+                 SavedSearch_User::class,
++                SavedSearch_UserTarget::class,
++                Group_SavedSearch::class
+             ]
+         );
+     }
+@@ -840,7 +938,20 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+                         $utable  => 'savedsearches_id',
+                         $table   => 'id'
+                     ]
+-                ]
++                ],
++                // relations for targetted savedsearch
++                SavedSearch_UserTarget::getTable() => [
++                    'ON' => [
++                        SavedSearch_UserTarget::getTable()  => 'savedsearches_id',
++                        $table   => 'id'
++                    ]
++                ],
++                Group_SavedSearch::getTable() => [
++                    'ON' => [
++                        Group_SavedSearch::getTable()  => 'savedsearches_id',
++                        $table   => 'id'
++                    ]
++                ],
+             ],
+             'ORDERBY'   => [
+                 'itemtype',
+@@ -1406,7 +1517,27 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+         $criteria = ['WHERE' => []];
+         $restrict = [
+             self::getTable() . '.is_private' => 1,
+-            self::getTable() . '.users_id'    => Session::getLoginUserID()
++            'OR' => [
++                // is owner
++                self::getTable() . '.users_id'    => Session::getLoginUserID(),
++                // directly targetted
++                SavedSearch_UserTarget::getTable().'.users_id' => Session::getLoginUserID(),
++                // targetted through groups
++                [
++                    'glpi_groups_savedsearches.groups_id' => count($_SESSION["glpigroups"])
++                        ? $_SESSION["glpigroups"]
++                        : [-1],
++                    'OR' => [
++                        ['glpi_groups_savedsearches.no_entity_restriction' => 1],
++                        getEntitiesRestrictCriteria(
++                            'glpi_groups_savedsearches',
++                            '',
++                            $_SESSION['glpiactiveentities'],
++                            true
++                        )
++                    ]
++                ]
++            ]
+         ];
+ 
+         if (Session::haveRight(self::$rightname, READ)) {
+@@ -1437,7 +1568,28 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+             return ['WHERE' => []];
+         }
+ 
+-        return self::getVisibilityCriteriaForMine();
++        if (!Session::haveRight(self::$rightname, READ)) {
++            return [
++                'WHERE' => ['glpi_savedsearches.users_id' => Session::getLoginUserID()],
++            ];
++        }
++
++        $criteria = ['WHERE' => []];
++        $restrict = [
++            self::getTable() . '.is_private' => 1,
++            self::getTable() . '.users_id'   => Session::getLoginUserID(),
++        ];
++        if (Session::haveRight(self::$rightname, READ)) {
++            $restrict = [
++                'OR' => [
++                    $restrict,
++                    [self::getTable() . '.is_private' => 0]
++                ]
++            ];
++        }
++
++        $criteria['WHERE'] = $restrict + getEntitiesRestrictCriteria(self::getTable(), '', '', true);
++        return $criteria;
+     }
+ 
+ 
+@@ -1450,4 +1602,12 @@ class SavedSearch extends CommonDBTM implements ExtraVisibilityCriteria
+     {
+         return [];
+     }
++
++    /**
++     * No specific right needed to be a target
++     * @return false
++     */
++    public function getVisibilityRight() {
++        return false;
++    }
+ }
+diff --git a/src/SavedSearch_UserTarget.php b/src/SavedSearch_UserTarget.php
+new file mode 100644
+index 0000000..eb60b33
+--- /dev/null
++++ b/src/SavedSearch_UserTarget.php
+@@ -0,0 +1,107 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class SavedSearch_UserTarget extends CommonDBRelation
++{
++    public $auto_message_on_action = false;
++
++    public static $itemtype_1          = 'SavedSearch';
++    public static $items_id_1          = 'savedsearches_id';
++
++    public static $itemtype_2          = 'User';
++    public static $items_id_2          = 'users_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++    public function prepareInputForUpdate($input)
++    {
++        return $this->can($input['id'], READ) ? $input : false;
++    }
++
++    /**
++     * Summary of getDefault
++     * @param mixed $users_id id of the user
++     * @param mixed $itemtype type of item
++     * @return array|boolean same output than SavedSearch::getParameters()
++     * @since 9.2
++     */
++    public static function getDefault($users_id, $itemtype)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $iter = $DB->request(['SELECT' => 'savedsearches_id',
++            'FROM'   => 'glpi_savedsearches_users',
++            'WHERE'  => ['users_id' => $users_id,
++                'itemtype' => $itemtype
++            ]
++        ]);
++        if (count($iter)) {
++            $row = $iter->current();
++            // Load default bookmark for this $itemtype
++            $bookmark = new SavedSearch();
++            // Only get data for bookmarks
++            return $bookmark->getParameters($row['savedsearches_id']);
++        }
++        return false;
++    }
++
++    /**
++     * Get users for a saved search
++     *
++     * @param SavedSearch $savedSearch SavedSearch instance
++     *
++     * @return array of users linked to a saved search
++     **/
++    public static function getUsers(SavedSearch $savedSearch)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $savedSearch->getID()
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/src/SolutionTemplate_User.php b/src/SolutionTemplate_User.php
+new file mode 100644
+index 0000000..73971f3
+--- /dev/null
++++ b/src/SolutionTemplate_User.php
+@@ -0,0 +1,72 @@
++<?php
++
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++
++class SolutionTemplate_User extends CommonDBRelation
++{
++    public $auto_message_on_action = false;
++
++    public static $itemtype_1          = 'SolutionTemplate';
++    public static $items_id_1          = 'solutiontemplates_id';
++
++    public static $itemtype_2          = 'User';
++    public static $items_id_2          = 'users_id';
++
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++    /**
++     * @param SolutionTemplate $solutionTemplate SolutionTemplate instance
++     *
++     * @return array
++     **/
++    public static function getUsers(SolutionTemplate $solutionTemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $solutionTemplate->getID()
++            ]
++        ]);
++
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/src/TaskTemplate_User.php b/src/TaskTemplate_User.php
+new file mode 100644
+index 0000000..321251e
+--- /dev/null
++++ b/src/TaskTemplate_User.php
+@@ -0,0 +1,65 @@
++<?php
++/**
++ * ---------------------------------------------------------------------
++ *
++ * GLPI - Gestionnaire Libre de Parc Informatique
++ *
++ * http://glpi-project.org
++ *
++ * @copyright 2015-2024 Teclib' and contributors.
++ * @copyright 2003-2014 by the INDEPNET Development Team.
++ * @licence   https://www.gnu.org/licenses/gpl-3.0.html
++ *
++ * ---------------------------------------------------------------------
++ *
++ * LICENSE
++ *
++ * This file is part of GLPI.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ *
++ * ---------------------------------------------------------------------
++ */
++class TaskTemplate_User extends CommonDBRelation
++{
++    public $auto_message_on_action = false;
++    public static $itemtype_1          = 'TaskTemplate';
++    public static $items_id_1          = 'tasktemplates_id';
++    public static $itemtype_2          = 'User';
++    public static $items_id_2          = 'users_id';
++    public static $checkItem_2_Rights  = self::DONT_CHECK_ITEM_RIGHTS;
++    public static $logs_for_item_2     = false;
++
++    /**
++     * @param TaskTemplate $taskTemplate TaskTemplate instance
++     *
++     * @return array
++     **/
++    public static function getUsers(TaskTemplate $taskTemplate)
++    {
++        /** @var \DBmysql $DB */
++        global $DB;
++        $results   = [];
++        $iterator = $DB->request([
++            'FROM'   => self::getTable(),
++            'WHERE'  => [
++                self::$items_id_1 => $taskTemplate->getID()
++            ]
++        ]);
++        foreach ($iterator as $data) {
++            $results[$data[self::$items_id_2]][] = $data;
++        }
++        return $results;
++    }
++}
+diff --git a/targets.sql b/targets.sql
+new file mode 100644
+index 0000000..e1483b3
+--- /dev/null
++++ b/targets.sql
+@@ -0,0 +1,209 @@
++START TRANSACTION;
++
++/* ENTITIES */
++DROP TABLE IF EXISTS `glpi_entities_solutiontemplates`;
++CREATE TABLE `glpi_entities_solutiontemplates` (
++                                                   `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                   `solutiontemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                   `entities_id` int unsigned  NOT NULL DEFAULT '0',
++                                                   `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                                   PRIMARY KEY (`id`),
++                                                   KEY `solutiontemplates_id` (`solutiontemplates_id`),
++                                                   KEY `entities_id` (`entities_id`),
++                                                   KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++INSERT INTO glpi_entities_solutiontemplates (solutiontemplates_id, entities_id, is_recursive)
++SELECT id, entities_id, is_recursive
++FROM glpi_solutiontemplates;
++
++DROP TABLE IF EXISTS `glpi_entities_tasktemplates`;
++CREATE TABLE `glpi_entities_tasktemplates` (
++                                               `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                               `tasktemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                               `entities_id` int unsigned  NOT NULL DEFAULT '0',
++                                               `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                               PRIMARY KEY (`id`),
++                                               KEY `tasktemplates_id` (`tasktemplates_id`),
++                                               KEY `entities_id` (`entities_id`),
++                                               KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++INSERT INTO glpi_entities_tasktemplates (tasktemplates_id, entities_id, is_recursive)
++SELECT id, entities_id, is_recursive
++FROM glpi_tasktemplates;
++
++DROP TABLE IF EXISTS `glpi_entities_itilfollowuptemplates`;
++CREATE TABLE `glpi_entities_itilfollowuptemplates` (
++                                                       `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                       `itilfollowuptemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                       `entities_id` int unsigned  NOT NULL DEFAULT '0',
++                                                       `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                                       PRIMARY KEY (`id`),
++                                                       KEY `itilfollowuptemplates_id` (`itilfollowuptemplates_id`),
++                                                       KEY `entities_id` (`entities_id`),
++                                                       KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++INSERT INTO glpi_entities_itilfollowuptemplates (itilfollowuptemplates_id, entities_id, is_recursive)
++SELECT id, entities_id, is_recursive
++FROM glpi_itilfollowuptemplates;
++
++/* END ENTITIES */
++
++/* PROFILES */
++DROP TABLE IF EXISTS `glpi_profiles_solutiontemplates`;
++CREATE TABLE `glpi_profiles_solutiontemplates` (
++                                                   `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                   `solutiontemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                   `profiles_id` int unsigned  NOT NULL DEFAULT '0',
++                                                   `entities_id` int unsigned  NULL,
++                                                   `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                                   `no_entity_restriction` tinyint NOT NULL DEFAULT '0',
++                                                   PRIMARY KEY (`id`),
++                                                   KEY `solutiontemplates_id` (`solutiontemplates_id`),
++                                                   KEY `profiles_id` (`profiles_id`),
++                                                   KEY `entities_id` (`entities_id`),
++                                                   KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_profiles_tasktemplates`;
++CREATE TABLE `glpi_profiles_tasktemplates` (
++                                               `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                               `tasktemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                               `profiles_id` int unsigned  NOT NULL DEFAULT '0',
++                                               `entities_id` int unsigned  NULL,
++                                               `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                               `no_entity_restriction` tinyint NOT NULL DEFAULT '0',
++                                               PRIMARY KEY (`id`),
++                                               KEY `tasktemplates_id` (`tasktemplates_id`),
++                                               KEY `profiles_id` (`profiles_id`),
++                                               KEY `entities_id` (`entities_id`),
++                                               KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_profiles_itilfollowuptemplates`;
++CREATE TABLE `glpi_profiles_itilfollowuptemplates` (
++                                                       `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                       `itilfollowuptemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                       `profiles_id` int unsigned  NOT NULL DEFAULT '0',
++                                                       `entities_id` int unsigned  NULL,
++                                                       `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                                       `no_entity_restriction` tinyint NOT NULL DEFAULT '0',
++                                                       PRIMARY KEY (`id`),
++                                                       KEY `itilfollowuptemplates_id` (`itilfollowuptemplates_id`),
++                                                       KEY `profiles_id` (`profiles_id`),
++                                                       KEY `entities_id` (`entities_id`),
++                                                       KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++/* END PROFILES */
++
++/* GROUPS */
++DROP TABLE IF EXISTS `glpi_groups_solutiontemplates`;
++CREATE TABLE `glpi_groups_solutiontemplates` (
++                                                   `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                   `solutiontemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                   `groups_id` int unsigned  NOT NULL DEFAULT '0',
++                                                   `entities_id` int unsigned  NULL,
++                                                   `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                                   `no_entity_restriction` tinyint NOT NULL DEFAULT '0',
++                                                   PRIMARY KEY (`id`),
++                                                   KEY `solutiontemplates_id` (`solutiontemplates_id`),
++                                                   KEY `groups_id` (`groups_id`),
++                                                   KEY `entities_id` (`entities_id`),
++                                                   KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_groups_tasktemplates`;
++CREATE TABLE `glpi_groups_tasktemplates` (
++                                               `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                               `tasktemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                               `groups_id` int unsigned  NOT NULL DEFAULT '0',
++                                               `entities_id` int unsigned  NULL,
++                                               `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                               `no_entity_restriction` tinyint NOT NULL DEFAULT '0',
++                                               PRIMARY KEY (`id`),
++                                               KEY `tasktemplates_id` (`tasktemplates_id`),
++                                               KEY `groups_id` (`groups_id`),
++                                               KEY `entities_id` (`entities_id`),
++                                               KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_groups_itilfollowuptemplates`;
++CREATE TABLE `glpi_groups_itilfollowuptemplates` (
++                                                       `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                       `itilfollowuptemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                       `groups_id` int unsigned  NOT NULL DEFAULT '0',
++                                                       `entities_id` int unsigned  NULL,
++                                                       `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                                       `no_entity_restriction` tinyint NOT NULL DEFAULT '0',
++                                                       PRIMARY KEY (`id`),
++                                                       KEY `itilfollowuptemplates_id` (`itilfollowuptemplates_id`),
++                                                       KEY `groups_id` (`groups_id`),
++                                                       KEY `entities_id` (`entities_id`),
++                                                       KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_groups_savedsearches`;
++CREATE TABLE `glpi_groups_savedsearches` (
++                                                     `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                     `savedsearches_id` int unsigned  NOT NULL DEFAULT '0',
++                                                     `groups_id` int unsigned  NOT NULL DEFAULT '0',
++                                                     `entities_id` int unsigned  NULL,
++                                                     `is_recursive` tinyint(1) NOT NULL DEFAULT '0',
++                                                     `no_entity_restriction` tinyint NOT NULL DEFAULT '0',
++                                                     PRIMARY KEY (`id`),
++                                                     KEY `savedsearches_id` (`savedsearches_id`),
++                                                     KEY `groups_id` (`groups_id`),
++                                                     KEY `entities_id` (`entities_id`),
++                                                     KEY `is_recursive` (`is_recursive`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++/* END GROUPS */
++
++/* USERS */
++DROP TABLE IF EXISTS `glpi_solutiontemplates_users`;
++CREATE TABLE `glpi_solutiontemplates_users` (
++                                                     `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                     `solutiontemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                     `users_id` int unsigned  NOT NULL DEFAULT '0',
++                                                     PRIMARY KEY (`id`),
++                                                     KEY `solutiontemplates_id` (`solutiontemplates_id`),
++                                                     KEY `users_id` (`users_id`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_tasktemplates_users`;
++CREATE TABLE `glpi_tasktemplates_users` (
++                                             `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                             `tasktemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                             `users_id` int unsigned  NOT NULL DEFAULT '0',
++                                             PRIMARY KEY (`id`),
++                                             KEY `tasktemplates_id` (`tasktemplates_id`),
++                                             KEY `users_id` (`users_id`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_itilfollowuptemplates_users`;
++CREATE TABLE `glpi_itilfollowuptemplates_users` (
++                                                     `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                                     `itilfollowuptemplates_id` int unsigned  NOT NULL DEFAULT '0',
++                                                     `users_id` int unsigned  NOT NULL DEFAULT '0',
++                                                     PRIMARY KEY (`id`),
++                                                     KEY `itilfollowuptemplates_id` (`itilfollowuptemplates_id`),
++                                                     KEY `users_id` (`users_id`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++
++DROP TABLE IF EXISTS `glpi_savedsearches_usertargets`;
++CREATE TABLE `glpi_savedsearches_usertargets` (
++                                             `id` int unsigned NOT NULL AUTO_INCREMENT,
++                                             `savedsearches_id` int unsigned  NOT NULL DEFAULT '0',
++                                             `users_id` int unsigned  NOT NULL DEFAULT '0',
++                                             PRIMARY KEY (`id`),
++                                             KEY `savedsearches_id` (`savedsearches_id`),
++                                             KEY `users_id` (`users_id`)
++) ENGINE = InnoDB ROW_FORMAT = DYNAMIC DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
++/* END USERS */
++
++/* PLANNING */
++ALTER TABLE `glpi_users` ADD `hide_done_tasks` TINYINT;
++INSERT INTO `glpi_configs` (context, name, value) VALUES ('core', 'hide_done_tasks', 0);
++
++COMMIT;
+diff --git a/templates/components/itilobject/answer.html.twig b/templates/components/itilobject/answer.html.twig
+index ac8ace7..7c85afb 100644
+--- a/templates/components/itilobject/answer.html.twig
++++ b/templates/components/itilobject/answer.html.twig
+@@ -54,7 +54,8 @@
+                            {{ include(timeline_itemtype.template, {
+                               'item': item,
+                               'subitem': timeline_itemtype.item,
+-                              'kb_id_toload': load_kb_sol
++                              'kb_id_toload': load_kb_sol,
++                              'subitem_template': timeline_itemtype.template_obj
+                            }) }}
+                         {% else %}
+                            {% set sf_options = {'parent': item} %}
+diff --git a/templates/components/itilobject/timeline/form_followup.html.twig b/templates/components/itilobject/timeline/form_followup.html.twig
+index ad66562..5ec6f00 100644
+--- a/templates/components/itilobject/timeline/form_followup.html.twig
++++ b/templates/components/itilobject/timeline/form_followup.html.twig
+@@ -138,6 +138,7 @@
+                               'on_change': 'itilfollowuptemplate_update' ~ rand ~ '(this.value)',
+                               'entity': item.fields['entities_id'],
+                               'rand': rand,
++                               'condition' : subitem_template.getDropdownCondition()
+                            }
+                         ) }}
+ 
+diff --git a/templates/components/itilobject/timeline/form_solution.html.twig b/templates/components/itilobject/timeline/form_solution.html.twig
+index 854ef15..23b8aea 100644
+--- a/templates/components/itilobject/timeline/form_solution.html.twig
++++ b/templates/components/itilobject/timeline/form_solution.html.twig
+@@ -160,6 +160,7 @@
+                               'rand': rand,
+                               'entity': item.fields['entities_id'],
+                               'disabled': disabled,
++                              'condition' : subitem_template.getDropdownCondition()
+                            }
+                         ) }}
+ 
+diff --git a/templates/components/itilobject/timeline/form_task.html.twig b/templates/components/itilobject/timeline/form_task.html.twig
+index 6980840..91fddca 100644
+--- a/templates/components/itilobject/timeline/form_task.html.twig
++++ b/templates/components/itilobject/timeline/form_task.html.twig
+@@ -195,6 +195,7 @@
+                            'on_change': 'itiltasktemplate_update' ~ rand ~ '(this.value)',
+                            'entity': item.fields['entities_id'],
+                            'rand': rand,
++                            'condition' : subitem_template.getDropdownCondition()
+                         }
+                      ) }}
+ 
+@@ -233,26 +234,6 @@
+                         }
+                      ) }}
+ 
+-                     {# Status #}
+-                     {% set task_state_lbl %}
+-                        <i class="fas fa-tasks fa-fw me-1" title="{{ __('Status') }}"></i>
+-                     {% endset %}
+-
+-                     {% set task_state %}
+-                        {% do call('Planning::dropdownState', ['state', subitem.fields['state'], true, {'rand': rand}]) %}
+-                     {% endset %}
+-
+-                     {{ fields.htmlField(
+-                        'state',
+-                        task_state,
+-                        task_state_lbl,
+-                        {
+-                           'full_width': true,
+-                           'icon_label': true,
+-                           'rand': rand,
+-                        }
+-                     ) }}
+-
+                      {% set task_private_lbl %}
+                         <i class="ti ti-lock fa-fw me-1" title="{{ __('Private') }}"></i>
+                      {% endset %}
+@@ -353,6 +334,26 @@
+                         }
+                      ) }}
+ 
++                      {# Status #}
++                      {% set task_state_lbl %}
++                          <i class="fas fa-tasks fa-fw me-1" title="{{ __('Status') }}"></i>
++                      {% endset %}
++
++                      {% set task_state %}
++                          {% do call('Planning::dropdownState', ['state', subitem.fields['state'], true, {'rand': rand}]) %}
++                      {% endset %}
++
++                      {{ fields.htmlField(
++                          'state',
++                          task_state,
++                          task_state_lbl,
++                          {
++                              'full_width': true,
++                              'icon_label': true,
++                              'rand': rand,
++                          }
++                      ) }}
++
+                      <script type="text/javascript">
+                         function showPlanUpdate{{ rand }}(e) {
+                            $('#plan{{ rand }}').hide();
+@@ -369,6 +370,7 @@
+                               parent_fk_field: "{{ item.getForeignKeyField() }}",
+                               begin: "{{ subitem.fields['begin'] }}",
+                               end: "{{ subitem.fields['end'] }}",
++                               rand: "{{ rand }}"
+                            });
+                         }
+                      </script>
+-- 
+2.37.3.windows.1
+
